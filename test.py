@@ -14,7 +14,7 @@ def cmd(c):
     while True:
         r = s.read(4)
         if len(r) == 0:
-            res = res.decode('ascii')
+            res = res.decode('ascii', errors='ignore')
             print(res)
             return res
         res += r
@@ -79,10 +79,19 @@ def send_data(addr, port, data):
         else:
             break
 
+    cmd('AT+CIICR')
+    # check ERROR/OK
+    cmd('AT+CIFSR') # this one is important
+    # check ERROR/OK
+
     # AT+CIPSTART="TCP","116.228.221.51","8500": start connection
     while True:
         res = cmd(f'AT+CIPSTART="TCP","{addr}","{port}"')
-        if res.find('CONNECT OK') >= 0:
+        ## NB! returns "OK\r\nCONNECT" instead of "CONNECT OK"
+        # "CONNECT FAIL"
+        if res.find('CONNECT FAIL'):
+            time.sleep(2)
+        elif res.find('CONNECT') >= 0:
             break
         else:
             time.sleep(2)
@@ -92,6 +101,7 @@ def send_data(addr, port, data):
     s.write(f'+++'.encode())
     time.sleep(1)
     cmd('AT+CIPCLOSE')
+    cmd('AT+CIPSHUT')
     return True
 
 
@@ -186,9 +196,8 @@ with serial.Serial(sys.argv[1], timeout=2) as s:
     # print(cmd('AT+CWHITELIST?')) # show whitelist
     # print(cmd('AT+CWHITELIST=1')) # enable call whitelist
 
-
     # cmd('AT+CMGDA') # Delete All SMS
     # cmd('AT+CWHITELIST=1') # enable call whitelist
     cmd('AT+CMEE=2') # set verbose error mode
-    send_text_data(sys.argv[2], sys.argv[3], sys.argv[4])
+    send_data(sys.argv[2], sys.argv[3], sys.argv[4])
 
