@@ -11,6 +11,7 @@ use cortex_m_rt::entry;
 use stm32f1xx_hal::{prelude::*, pac, i2c, timer::Timer};
 
 use embedded_drivers::bmp180::BMP180;
+use lsm303dlhc::Lsm303dlhc;
 
 #[entry]
 fn main() -> ! {
@@ -64,12 +65,18 @@ fn main() -> ! {
         )
     };
 
-    let mut bmp180 = BMP180::new(i2c);
-    bmp180.init();
+    // let mut bmp180 = BMP180::new(i2c);
+    // bmp180.init();
+
+    let mut lsm303 = Lsm303dlhc::new(i2c).unwrap();
 
     loop {
-        rprintln!("t: {}", bmp180.get_temperature(&mut delay));
-        rprintln!("p: {}", bmp180.get_pressure(&mut delay));
+        let m = lsm303.mag().unwrap();
+        rprintln!("m: {} {} {}", m.x, m.y, m.z);
+        rprintln!("t: {}", lsm303.temp().unwrap());
+
+        // rprintln!("t: {}", bmp180.get_temperature(&mut delay));
+        // rprintln!("p: {}", bmp180.get_pressure(&mut delay));
         block!(timer.wait()).unwrap();
     }
 }
