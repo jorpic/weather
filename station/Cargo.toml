@@ -13,3 +13,4 @@ stm32f1xx-hal = { version = "0.10", features = ["rt", "stm32f103", "medium"] }
 nb = "1.1"
 rtt-target = "0.4"
 panic-rtt-target = { version = "0.1", features = ["cortex-m"] }
+embedded-drivers = "0.0.2"
