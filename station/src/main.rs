@@ -5,14 +5,19 @@
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use cortex_m::asm;
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{prelude::*, pac, i2c, usb};
+
 use usb_device::device::{UsbDeviceBuilder, UsbVidPid};
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 use embedded_drivers::bmp180::BMP180;
 use lsm303dlhc::Lsm303dlhc;
+
+static LOOP_FLAG: AtomicBool = AtomicBool::new(false);
 
 #[entry]
 fn main() -> ! {
@@ -25,8 +30,7 @@ fn main() -> ! {
 
     {   // enable debug cycle counter (required by I2C)
         core.DWT.enable_cycle_counter();
-        // FIXME: ??
-        core.DCB.enable_trace();
+        core.DCB.enable_trace(); // FIXME: what is this?
     }
 
     let mut flash = pac.FLASH.constrain();
@@ -42,7 +46,7 @@ fn main() -> ! {
 
     let mut delay = pac.TIM1.delay_ms(&clocks);
 
-    let mut gpioa = pac.GPIOA.split();
+    let gpioa = pac.GPIOA.split();
     let mut gpiob = pac.GPIOB.split();
     let mut gpioc = pac.GPIOC.split();
 
@@ -64,16 +68,15 @@ fn main() -> ! {
         .product("Weather station")
         .serial_number("v0.0")
         .device_class(USB_CLASS_CDC)
-        // .self_powered(true)
+        .self_powered(true)
         .build();
-
 
     // I2C
     let i2c = {
         let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
         let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
 
-        i2c::BlockingI2c::i2c1(
+        let i2c = i2c::BlockingI2c::i2c1(
             pac.I2C1,
             (scl, sda),
             &mut afio.mapr,
@@ -86,30 +89,36 @@ fn main() -> ! {
             10,   // start_retries
             1000, // addr_timeout_us
             1000, // data_timeout_us
-        )
+        );
+        shared_bus::BusManagerSimple::new(i2c)
     };
 
-    // let mut bmp180 = BMP180::new(i2c);
-    // bmp180.init();
-
-    // let mut lsm303 = Lsm303dlhc::new(i2c).unwrap();
-
+    let mut loop_count = 0usize;
     loop {
-        asm::wfi();
+        usb_dev.poll(&mut [&mut usb_serial]);
 
-        if !usb_dev.poll(&mut [&mut usb_serial]) {
+        if !LOOP_FLAG.swap(false, Ordering::Relaxed) {
             continue;
         }
-        // let m = lsm303.mag().unwrap();
-        // rprintln!("m: {} {} {}", m.x, m.y, m.z);
-        // rprintln!("t: {}", lsm303.temp().unwrap());
 
-        // rprintln!("t: {}", bmp180.get_temperature(&mut delay));
-        // rprintln!("p: {}", bmp180.get_pressure(&mut delay));
-        delay.delay_ms(500u16);
+        let mut lsm303 = Lsm303dlhc::new(i2c.acquire_i2c()).unwrap();
+        let m = lsm303.mag().unwrap();
+        rprintln!("m: {} {} {}", m.x, m.y, m.z);
+        rprintln!("t: {}", lsm303.temp().unwrap());
+
+        let mut bmp180 = BMP180::new(i2c.acquire_i2c());
+        bmp180.init();
+        rprintln!("t: {}", bmp180.get_temperature(&mut delay));
+        rprintln!("p: {}", bmp180.get_pressure(&mut delay));
+
         let _ = usb_serial.write(b"hello world!\r\n");
-        // led.set_high();
-        // delay.delay_ms(500u16);
-        // led.set_low();
+        led.set_low();
+        delay.delay_ms(500u16);
+        led.set_high();
+
+        if loop_count >= 10 {
+            rprintln!("TODO: Send to server");
+            loop_count = 0;
+        }
     }
 }
