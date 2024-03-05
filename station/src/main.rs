@@ -7,7 +7,6 @@ use rtt_target::{rprintln, rtt_init_print};
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use cortex_m::asm;
 use cortex_m_rt::entry;
 use stm32f1xx_hal::{prelude::*, pac, i2c, usb};
 
@@ -92,6 +91,8 @@ fn main() -> ! {
         );
         shared_bus::BusManagerSimple::new(i2c)
     };
+
+    rprintln!("Entering loop");
 
     let mut loop_count = 0usize;
     loop {
