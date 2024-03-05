@@ -5,10 +5,11 @@
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
-use nb::block;
-
+use cortex_m::asm;
 use cortex_m_rt::entry;
-use stm32f1xx_hal::{prelude::*, pac, i2c, timer::Timer};
+use stm32f1xx_hal::{prelude::*, pac, i2c, usb};
+use usb_device::device::{UsbDeviceBuilder, UsbVidPid};
+use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 use embedded_drivers::bmp180::BMP180;
 use lsm303dlhc::Lsm303dlhc;
@@ -33,16 +34,39 @@ fn main() -> ! {
     let rcc = pac.RCC.constrain();
 
     // Setup ADC clock
-    let clocks = rcc.cfgr.adcclk(2.MHz()).freeze(&mut flash.acr);
+    let clocks = rcc.cfgr
+        .use_hse(8.MHz())
+        .sysclk(48.MHz())
+        .pclk1(24.MHz())
+        .freeze(&mut flash.acr);
 
     let mut delay = pac.TIM1.delay_ms(&clocks);
 
-    // Configure the syst timer to trigger an update every second
-    let mut timer = Timer::syst(core.SYST, &clocks).counter_hz();
-    timer.start(1.Hz()).unwrap();
-
     let mut gpioa = pac.GPIOA.split();
     let mut gpiob = pac.GPIOB.split();
+    let mut gpioc = pac.GPIOC.split();
+
+    // LED
+    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+
+    // USB CDC-ACM
+    assert!(clocks.usbclk_valid());
+
+    let usb_bus = usb::UsbBus::new(usb::Peripheral {
+        usb: pac.USB,
+        pin_dm: gpioa.pa11,
+        pin_dp: gpioa.pa12,
+    });
+
+    let mut usb_serial = SerialPort::new(&usb_bus);
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+        .manufacturer("Fake company")
+        .product("Weather station")
+        .serial_number("v0.0")
+        .device_class(USB_CLASS_CDC)
+        // .self_powered(true)
+        .build();
+
 
     // I2C
     let i2c = {
@@ -68,15 +92,24 @@ fn main() -> ! {
     // let mut bmp180 = BMP180::new(i2c);
     // bmp180.init();
 
-    let mut lsm303 = Lsm303dlhc::new(i2c).unwrap();
+    // let mut lsm303 = Lsm303dlhc::new(i2c).unwrap();
 
     loop {
-        let m = lsm303.mag().unwrap();
-        rprintln!("m: {} {} {}", m.x, m.y, m.z);
-        rprintln!("t: {}", lsm303.temp().unwrap());
+        asm::wfi();
+
+        if !usb_dev.poll(&mut [&mut usb_serial]) {
+            continue;
+        }
+        // let m = lsm303.mag().unwrap();
+        // rprintln!("m: {} {} {}", m.x, m.y, m.z);
+        // rprintln!("t: {}", lsm303.temp().unwrap());
 
         // rprintln!("t: {}", bmp180.get_temperature(&mut delay));
         // rprintln!("p: {}", bmp180.get_pressure(&mut delay));
-        block!(timer.wait()).unwrap();
+        delay.delay_ms(500u16);
+        let _ = usb_serial.write(b"hello world!\r\n");
+        // led.set_high();
+        // delay.delay_ms(500u16);
+        // led.set_low();
     }
 }
